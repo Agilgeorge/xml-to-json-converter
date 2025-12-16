@@ -527,22 +527,35 @@ function updateSelectMetadata(node: any, upstreamFields: any[]): void {
       
       if (upstreamField) {
         // Field exists in upstream - enrich with type info
-        return {
+        const result: any = {
           "@field": fieldName,
           "@selected": sf["@selected"] || "True",
-          "@rename": sf["@rename"] || fieldName,
           "@type": sf["@type"] || upstreamField["@type"] || "V_String",
           "@size": sf["@size"] || upstreamField["@size"] || "254"
         };
+        
+        // Only add @rename if it exists and is different from field name
+        if (sf["@rename"] && sf["@rename"] !== fieldName) {
+          result["@rename"] = sf["@rename"];
+        }
+        
+        return result;
       } else {
         // Field doesn't exist in upstream - mark as missing but keep it
         console.warn(`   ⚠️ Field "${fieldName}" not found in upstream, keeping with selected=False`);
-        return {
+        const result: any = {
           "@field": fieldName,
           "@selected": "False",
           "@type": sf["@type"] || "V_String",
           "@size": sf["@size"] || "254"
         };
+        
+        // Preserve rename even if field is missing
+        if (sf["@rename"] && sf["@rename"] !== fieldName) {
+          result["@rename"] = sf["@rename"];
+        }
+        
+        return result;
       }
     });
     
@@ -567,12 +580,16 @@ function updateSelectMetadata(node: any, upstreamFields: any[]): void {
   // Update MetaInfo based on selected fields only
   const outputFields = selectFields
     .filter((sf: any) => sf["@selected"] === "True")
-    .map((sf: any) => ({
-      "@name": sf["@rename"] || sf["@field"],
-      "@type": sf["@type"] || "V_String",
-      "@size": sf["@size"] || "254",
-      "@source": "Select"
-    }));
+    .map((sf: any) => {
+      // Use renamed field name if it exists, otherwise use original field name
+      const outputName = sf["@rename"] || sf["@field"];
+      return {
+        "@name": outputName,
+        "@type": sf["@type"] || "V_String",
+        "@size": sf["@size"] || "254",
+        "@source": "Select"
+      };
+    });
   
   node.Properties.MetaInfo = {
     "@connection": "Output",
@@ -959,8 +976,37 @@ function convertSelectTool(cloudNode: any, originalNode: any): void {
   config.OrderChanged = config.OrderChanged || { "@value": "False" };
   config.CommaDecimal = config.CommaDecimal || { "@value": "False" };
   
-  // Initialize SelectFields (will be populated during metadata propagation)
-  if (!config.SelectFields?.SelectField) {
+  // Ensure SelectFields structure with ALL attributes preserved
+  if (config.SelectFields?.SelectField) {
+    let selectFields = Array.isArray(config.SelectFields.SelectField)
+      ? config.SelectFields.SelectField
+      : [config.SelectFields.SelectField];
+    
+    // Preserve ALL attributes from original XML
+    selectFields = selectFields.map((sf: any) => {
+      const field: any = {
+        "@field": sf["@field"] || sf.field,
+        "@selected": sf["@selected"] || sf.selected || "True"
+      };
+      
+      // Preserve rename attribute if it exists
+      if (sf["@rename"] || sf.rename) {
+        field["@rename"] = sf["@rename"] || sf.rename;
+      }
+      
+      // Preserve type and size
+      if (sf["@type"] || sf.type) {
+        field["@type"] = sf["@type"] || sf.type;
+      }
+      if (sf["@size"] || sf.size) {
+        field["@size"] = sf["@size"] || sf.size;
+      }
+      
+      return field;
+    });
+    
+    config.SelectFields.SelectField = selectFields;
+  } else {
     config.SelectFields = {
       SelectField: [{ "@field": "*Unknown", "@selected": "True" }]
     };
